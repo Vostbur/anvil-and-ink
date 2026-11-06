@@ -1,0 +1,247 @@
+# ============================================================
+# CANON: «Последняя батарея»
+# Schema v1. Загружается при старте сессии, в ходе игры не меняется.
+# ============================================================
+
+meta:
+  schema_version: 1
+  title: "Последняя батарея"
+  start_location: loc_shelter
+  note: >
+    MVP-канон для проверки конвейера Уровня 1.
+    Три локации, два NPC, четыре типа предметов (фильтр — два экземпляра).
+
+# ------------------------------------------------------------
+# Стартовое состояние
+# ------------------------------------------------------------
+initial_state:
+  location: loc_shelter
+  stats:
+    hp: 10
+  inventory: {}          # {item_type_id: count}
+  flags:
+    bunker_door_open: false
+    has_code: false
+    wounded_watered: false
+    game_won: false
+
+# ------------------------------------------------------------
+# Реестр флагов
+# ------------------------------------------------------------
+flags:
+  bunker_door_open:
+    type: bool
+    description: "Дверь в бункер разблокирована (код применён)."
+  has_code:
+    type: bool
+    description: "Игрок получил код у торговца. Информационный, механикой не проверяется."
+  wounded_watered:
+    type: bool
+    description: "Раненый получил воду и отдал свой фильтр."
+  game_won:
+    type: bool
+    description: "Игрок вошёл в бункер. Условие победы."
+
+# ------------------------------------------------------------
+# Локации. entities — единственное место, где объявлено,
+# кто/что здесь изначально. Выходы могут иметь condition и effects.
+# ------------------------------------------------------------
+locations:
+  - id: loc_shelter
+    name: "Убежище"
+    description: "Бетонная коробка, тусклая лампа, на полу — фляга."
+    exits:
+      - direction: east
+        to: loc_market
+    entities:
+      - item_flask
+
+  - id: loc_market
+    name: "Рынок"
+    description: >
+      Ржавые контейнеры, у стены сидит раненый, за прилавком — торговец,
+      на земле валяется фильтр и сломанный фонарь.
+    exits:
+      - direction: west
+        to: loc_shelter
+      - direction: north
+        to: loc_bunker
+        condition:
+          - type: flag
+            flag: bunker_door_open
+            equals: true
+        effects:
+          - type: set_flag
+            flag: game_won
+            value: true
+    entities:
+      - npc_wounded
+      - npc_trader
+      - item_filter
+      - item_lamp
+
+  - id: loc_bunker
+    name: "Бункер"
+    description: "Тяжёлая дверь позади, впереди — темнота."
+    exits:
+      - direction: south
+        to: loc_market
+    entities: []
+
+# ------------------------------------------------------------
+# NPC. Без location и held_items: где стоит — в entities локации;
+# что выдаёт — в effect'ах USE-правил.
+# ------------------------------------------------------------
+npcs:
+  - id: npc_wounded
+    name: "Раненый у входа"
+    topics:
+      - key: "фильтры"
+        response: "У меня есть один, но мне нужна вода."
+      - key: "код"
+        response: "Торговец знает. Спроси у него."
+
+  - id: npc_trader
+    name: "Торговец"
+    topics:
+      - key: "код"
+        response: "Держи. Не потеряй."
+        response_on_fail: "Принеси два фильтра — и код твой."
+        condition:
+          - type: inventory_count
+            item: item_filter
+            min: 2
+        effects:
+          - type: remove_from_inventory
+            item: item_filter
+            count: 2
+          - type: add_to_inventory
+            item: item_code
+            count: 1
+          - type: set_flag
+            flag: has_code
+            value: true
+
+# ------------------------------------------------------------
+# Специальные цели применения. exit — структурная ссылка
+# на конкретный выход, к которому применима цель.
+# ------------------------------------------------------------
+use_targets:
+  - id: exit_north_market
+    name: "Дверь в бункер"
+    aliases: ["дверь", "дверь в бункер", "дверь на севере"]
+    exit:
+      location: loc_market
+      direction: north
+
+# ------------------------------------------------------------
+# Типы предметов
+# ------------------------------------------------------------
+items:
+  - id: item_flask
+    name: "Фляга воды"
+    takeable: true
+    use:
+      - target: npc_wounded
+        condition:
+          - type: flag
+            flag: wounded_watered
+            equals: false
+        effects:
+          - type: remove_from_inventory
+            item: item_flask
+            count: 1
+          - type: add_to_inventory
+            item: item_filter
+            count: 1
+          - type: set_flag
+            flag: wounded_watered
+            value: true
+        response: "Раненый жадно пьёт и протягивает вам фильтр."
+        response_on_fail: "Он уже напился воды."
+
+  - id: item_filter
+    name: "Фильтр"
+    takeable: true
+    use: []                # ни на что не применяется
+
+  - id: item_lamp
+    name: "Сломанный фонарь"
+    takeable: true
+    use: []                # ложный предмет
+
+  - id: item_code
+    name: "Код"
+    takeable: true
+    use:
+      - target: exit_north_market
+        effects:
+          - type: set_flag
+            flag: bunker_door_open
+            value: true
+        response: "Замок щёлкает, дверь приоткрывается."
+
+# ------------------------------------------------------------
+# Словарь парсера
+# ------------------------------------------------------------
+verbs:
+  GO:
+    aliases: ["идти", "пойти", "в", "на", "к"]
+    args: [direction]
+  LOOK:
+    aliases: ["осмотреть", "оглядеться", "смотреть"]
+    args: []
+  TAKE:
+    aliases: ["взять", "поднять", "подобрать"]
+    args: [item]
+  DROP:
+    aliases: ["бросить", "оставить", "выложить"]
+    args: [item]
+  TALK:
+    aliases: ["говорить", "поговорить", "спросить"]
+    args: [npc, topic]
+  USE:
+    aliases: ["использовать", "применить", "открыть"]
+    args: [item, target]
+
+unknown_command: UNKNOWN
+
+directions:
+  - id: east
+    name: "восток"
+    aliases: ["восток", "на восток"]
+  - id: west
+    name: "запад"
+    aliases: ["запад", "на запад"]
+  - id: north
+    name: "север"
+    aliases: ["север", "на север"]
+  - id: south
+    name: "юг"
+    aliases: ["юг", "на юг"]
+
+# ------------------------------------------------------------
+# Реестр кодов причин
+# ------------------------------------------------------------
+reason_codes:
+  ok:                  "Действие выполнено"
+  no_exit:             "Такого выхода нет"
+  locked:              "Выход заперт"
+  no_item_here:        "Здесь нет такого предмета"
+  not_takeable:        "Это нельзя взять"
+  not_in_inventory:    "Этого нет в инвентаре"
+  no_npc_here:         "Здесь нет такого собеседника"
+  no_topic:            "Собеседник не хочет говорить на эту тему"
+  condition_not_met:   "Условие не выполнено"
+  no_target:           "Такой цели нет"
+  target_not_here:     "Цель находится в другом месте"
+  invalid_combination: "Так это применить нельзя"
+  unknown:             "Команда не распознана"
+
+# ------------------------------------------------------------
+# Условие победы
+# ------------------------------------------------------------
+win_condition:
+  - type: flag
+    flag: game_won
+    equals: true
