@@ -5,15 +5,23 @@ from typing import Any
 
 from anvil_and_ink.models import Canon
 
+# D-66: движок требует полный набор — загрузчик это гарантирует.
+_ENGINE_CODES = frozenset({"ok", "unknown", "denied", "not_applicable"})
+_VALID_ARGS = frozenset({"direction", "item", "npc", "topic", "target"})
+
+
 class CanonError(Exception):
     def __init__(self, errors: list[str]):
         self.errors = errors
         super().__init__("\n".join(errors))
 
+
 ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
 
 def _err(errors: list[str], path: str, msg: str) -> None:
     errors.append(f"{path}: {msg}")
+
 
 def load_canon(path: str | Path) -> Canon:
     errors: list[str] = []
@@ -22,7 +30,7 @@ def load_canon(path: str | Path) -> Canon:
     except yaml.YAMLError as e:
         raise CanonError([f"YAML syntax error: {e}"])
 
-    # ---------- Фаза 1. Разбор и форма (фатальная) ----------
+    # ---------- Фаза 1. Форма (фатальная) ----------
     if not isinstance(raw, dict):
         raise CanonError(["Root YAML must be a mapping"])
     meta = raw.get("meta")
@@ -43,9 +51,9 @@ def load_canon(path: str | Path) -> Canon:
         if raw[sec] is None:
             raw[sec] = [] if sec != "initial_state" else {}
 
-    # ---------- Фаза 2. Реестры и уникальность id ----------
+    # ---------- Фаза 2. Реестры ----------
     def index_list(section: str, key: str = "id") -> dict[str, dict]:
-        index = {}
+        index: dict[str, dict] = {}
         for i, item in enumerate(raw[section]):
             if not isinstance(item, dict) or key not in item:
                 _err(errors, f"{section}[{i}]", f"missing {key}")
@@ -67,7 +75,6 @@ def load_canon(path: str | Path) -> Canon:
     directions = index_list("directions")
     verbs = index_list("verbs")
 
-    # flags — словарь, не список
     flags: dict[str, dict] = {}
     for f_id, f_def in raw["flags"].items():
         if not ID_RE.fullmatch(f_id):
@@ -81,22 +88,17 @@ def load_canon(path: str | Path) -> Canon:
             continue
         flags[f_id] = f_def
 
-    # reason_codes — множество
-    reason_codes = set()
+    reason_codes: set[str] = set()
     for rc in raw["reason_codes"]:
         if not isinstance(rc, str) or not rc:
             _err(errors, "reason_codes", f"invalid entry {rc!r}")
             continue
         reason_codes.add(rc)
-    if "ok" not in reason_codes or "unknown" not in reason_codes:
-        _err(errors, "reason_codes", "must contain 'ok' and 'unknown'")
+    missing_engine = _ENGINE_CODES - reason_codes
+    if missing_engine:
+        _err(errors, "reason_codes", f"missing codes required by engine: {sorted(missing_engine)}")
 
     # ---------- Фаза 3. Валидация реестров ----------
-    for f_id, f_def in flags.items():
-        if f_def["type"] not in ("bool", "number"):
-            _err(errors, f"flags.{f_id}.type", "must be bool or number")
-
-    # initial_state.flags
     init_flags = raw["initial_state"].get("flags", {})
     for f_id in flags:
         if f_id not in init_flags:
@@ -105,22 +107,22 @@ def load_canon(path: str | Path) -> Canon:
         if f_id not in flags:
             _err(errors, f"initial_state.flags.{f_id}", "flag not declared in flags")
 
-    # verbs
     for v_id, v_def in verbs.items():
         if not v_def.get("aliases"):
             _err(errors, f"verbs.{v_id}.aliases", "at least one alias required")
         for arg in v_def.get("args", []):
-            if arg not in {"direction", "item", "npc", "topic", "target"}:
+            if arg not in _VALID_ARGS:
                 _err(errors, f"verbs.{v_id}.args", f"unknown arg {arg!r}")
+        for arg in v_def.get("optional_args", []):
+            if arg not in _VALID_ARGS:
+                _err(errors, f"verbs.{v_id}.optional_args", f"unknown arg {arg!r}")
 
-    # directions
     for d_id, d_def in directions.items():
         if not d_def.get("name"):
             _err(errors, f"directions.{d_id}.name", "must be non-empty")
         if not d_def.get("aliases"):
             _err(errors, f"directions.{d_id}.aliases", "at least one alias required")
 
-    # use_targets
     for ut_id, ut_def in use_targets.items():
         if not ut_def.get("name"):
             _err(errors, f"use_targets.{ut_id}.name", "must be non-empty")
@@ -141,13 +143,11 @@ def load_canon(path: str | Path) -> Canon:
                 _err(errors, f"{path}.to", f"unknown location {exit_.get('to')!r}")
             if exit_.get("direction") not in direction_ids:
                 _err(errors, f"{path}.direction", f"unknown direction {exit_.get('direction')!r}")
-
         for i, ent in enumerate(loc.get("entities", [])):
             if ent not in item_type_ids and ent not in npc_ids:
                 _err(errors, f"locations[{loc_id}].entities[{i}]",
                      f"entity {ent!r} is neither item type nor NPC")
 
-    # NPC ровно в одной локации
     npc_occurrences = {npc_id: 0 for npc_id in npc_ids}
     for loc in locations.values():
         for ent in loc.get("entities", []):
@@ -155,9 +155,9 @@ def load_canon(path: str | Path) -> Canon:
                 npc_occurrences[ent] += 1
     for npc_id, count in npc_occurrences.items():
         if count != 1:
-            _err(errors, f"npcs.{npc_id}", f"must appear in exactly one location, found {count}")
+            _err(errors, f"npcs.{npc_id}",
+                 f"must appear in exactly one location, found {count}")
 
-    # use_target.exit
     for ut_id, ut in use_targets.items():
         exit_ref = ut.get("exit")
         if exit_ref:
@@ -171,7 +171,6 @@ def load_canon(path: str | Path) -> Canon:
                     _err(errors, f"use_targets.{ut_id}.exit",
                          f"no exit {dir_id!r} in location {loc_id!r}")
 
-    # use[].target
     for ut_id, ut in use_targets.items():
         for i, rule in enumerate(ut.get("use", [])):
             target = rule.get("target")
@@ -179,7 +178,6 @@ def load_canon(path: str | Path) -> Canon:
                 _err(errors, f"use_targets.{ut_id}.use[{i}].target",
                      f"unknown target {target!r}")
 
-    # condition / effect закрытые наборы
     def check_condition(cond: dict, path: str) -> None:
         ctype = cond.get("type")
         if ctype == "flag":
@@ -193,16 +191,20 @@ def load_canon(path: str | Path) -> Canon:
 
     def check_effect(eff: dict, path: str) -> None:
         etype = eff.get("type")
-        if etype == "set_flag":
+        if etype in ("set_flag",):
             if eff.get("flag") not in flags:
                 _err(errors, f"{path}.flag", f"unknown flag {eff.get('flag')!r}")
         elif etype in ("add_to_inventory", "remove_from_inventory"):
             if eff.get("item") not in item_type_ids:
                 _err(errors, f"{path}.item", f"unknown item type {eff.get('item')!r}")
+        elif etype == "move":
+            if eff.get("from") not in location_ids or eff.get("to") not in location_ids:
+                _err(errors, path, "move from/to must be known locations")
+        elif etype in ("win", "game_over"):
+            pass
         else:
             _err(errors, path, f"unknown effect type {etype!r}")
 
-    # Обход всех conditions/effects в локациях, NPC, use_targets
     for loc_id, loc in locations.items():
         for i, exit_ in enumerate(loc.get("exits", [])):
             for j, cond in enumerate(exit_.get("condition", [])):
@@ -210,17 +212,31 @@ def load_canon(path: str | Path) -> Canon:
             for j, eff in enumerate(exit_.get("effects", [])):
                 check_effect(eff, f"locations[{loc_id}].exits[{i}].effects[{j}]")
 
-    # win_condition
+    for ut_id, ut in use_targets.items():
+        for i, rule in enumerate(ut.get("use", [])):
+            for j, cond in enumerate(rule.get("condition", [])):
+                check_condition(cond, f"use_targets[{ut_id}].use[{i}].condition[{j}]")
+            for j, eff in enumerate(rule.get("effects", [])):
+                check_effect(eff, f"use_targets[{ut_id}].use[{i}].effects[{j}]")
+
+    for npc_id, npc in npcs.items():
+        for i, rule in enumerate(npc.get("use", [])):
+            for j, cond in enumerate(rule.get("condition", [])):
+                check_condition(cond, f"npcs[{npc_id}].use[{i}].condition[{j}]")
+            for j, eff in enumerate(rule.get("effects", [])):
+                check_effect(eff, f"npcs[{npc_id}].use[{i}].effects[{j}]")
+        for i, eff in enumerate(npc.get("effects", [])):
+            check_effect(eff, f"npcs[{npc_id}].effects[{i}]")
+
     for i, cond in enumerate(raw["win_condition"]):
         check_condition(cond, f"win_condition[{i}]")
 
     # ---------- Фаза 5. Семантика ----------
-    # Достижимость локаций
     start = meta["start_location"]
     if start not in locations:
         _err(errors, "meta.start_location", f"unknown location {start!r}")
     else:
-        reachable = set()
+        reachable: set[str] = set()
         stack = [start]
         while stack:
             current = stack.pop()
@@ -233,29 +249,24 @@ def load_canon(path: str | Path) -> Canon:
                     stack.append(to_loc)
         for loc_id in locations:
             if loc_id not in reachable:
-                # Предупреждение, не ошибка — по спецификации
                 print(f"[WARN] Location {loc_id!r} is unreachable from start")
 
-    # Открываемость замков и победы
-    set_true_flags = set()
+    set_true_flags: set[str] = set()
     for loc in locations.values():
         for exit_ in loc.get("exits", []):
             for eff in exit_.get("effects", []):
                 if eff.get("type") == "set_flag" and eff.get("value") is True:
                     set_true_flags.add(eff["flag"])
-    # Эффекты в use_targets
     for ut in use_targets.values():
         for rule in ut.get("use", []):
             for eff in rule.get("effects", []):
                 if eff.get("type") == "set_flag" and eff.get("value") is True:
                     set_true_flags.add(eff["flag"])
-    # Эффекты в NPC (для простоты — только верхнеуровневые)
     for npc in npcs.values():
         for eff in npc.get("effects", []):
             if eff.get("type") == "set_flag" and eff.get("value") is True:
                 set_true_flags.add(eff["flag"])
 
-    # Условия на выходах, требующие flag=true
     for loc_id, loc in locations.items():
         for i, exit_ in enumerate(loc.get("exits", [])):
             for j, cond in enumerate(exit_.get("condition", [])):
@@ -265,20 +276,18 @@ def load_canon(path: str | Path) -> Canon:
                              f"locations[{loc_id}].exits[{i}].condition[{j}]",
                              f"flag {cond['flag']!r} is never set to true")
 
-    # win_condition flag
     for i, cond in enumerate(raw["win_condition"]):
-        if cond.get("type") == "flag" and cond["flag"] not in set_true_flags:
+        if cond.get("type") == "flag" and cond.get("equals") is True \
+                and cond["flag"] not in set_true_flags:
             _err(errors, f"win_condition[{i}]",
                  f"win condition flag {cond['flag']!r} is never set to true")
 
-    # Живость типов предметов
-    item_instances = set()
+    item_instances: set[str] = set()
     for loc in locations.values():
         for ent in loc.get("entities", []):
             if ent in item_type_ids:
                 item_instances.add(ent)
-    # add_to_inventory создаёт экземпляр
-    produced_items = set()
+    produced_items: set[str] = set()
     for ut in use_targets.values():
         for rule in ut.get("use", []):
             for eff in rule.get("effects", []):
@@ -290,10 +299,10 @@ def load_canon(path: str | Path) -> Canon:
                 produced_items.add(eff["item"])
     for item_id in item_type_ids:
         if item_id not in item_instances and item_id not in produced_items:
-            _err(errors, f"items.{item_id}", "item type has no instance and no producer")
+            _err(errors, f"items.{item_id}",
+                 "item type has no instance and no producer")
 
     # ---------- Фаза 6. Перекрёстная согласованность ----------
-    # Проверка use_target.exit ↔ USE-правило, ставящее флаг
     for ut_id, ut in use_targets.items():
         exit_ref = ut.get("exit")
         if not exit_ref:
@@ -303,19 +312,18 @@ def load_canon(path: str | Path) -> Canon:
         exits = locations[loc_id].get("exits", [])
         exit_obj = next((e for e in exits if e.get("direction") == dir_id), None)
         if not exit_obj:
-            continue  # уже ошибка выше
-        # Условие на выходе, если есть
-        cond_flags = set()
+            continue
+        cond_flags: set[str] = set()
         for cond in exit_obj.get("condition", []):
             if cond.get("type") == "flag" and cond.get("equals") is True:
                 cond_flags.add(cond["flag"])
         if not cond_flags:
-            continue  # нет условия — проверка не требуется
-        # Ищем USE-правило, которое ставит хотя бы один из этих флагов
+            continue
         found = False
         for rule in ut.get("use", []):
             for eff in rule.get("effects", []):
-                if eff.get("type") == "set_flag" and eff.get("value") is True and eff["flag"] in cond_flags:
+                if eff.get("type") == "set_flag" and eff.get("value") is True \
+                        and eff["flag"] in cond_flags:
                     found = True
                     break
             if found:
@@ -324,13 +332,13 @@ def load_canon(path: str | Path) -> Canon:
             _err(errors, f"use_targets.{ut_id}",
                  "exit requires flag(s) that no USE rule sets")
 
-    # Уникальность имён сущностей (предупреждение)
-    all_names = []
+    # Предупреждения, не ошибки
+    all_names: list[str] = []
     for registry in (locations, npcs, items, use_targets):
         for entity in registry.values():
             if "name" in entity:
                 all_names.append(entity["name"])
-    seen = set()
+    seen: set[str] = set()
     for name in all_names:
         if name in seen:
             print(f"[WARN] Duplicate entity name: {name!r}")

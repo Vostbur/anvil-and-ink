@@ -4,11 +4,12 @@ from typing import Any
 
 from anvil_and_ink.models import Canon, Event, GameState
 
+
 class ProjectionError(Exception):
     """Ошибка целостности лога событий. Состояние после неё не восстанавливается."""
 
+
 def project_initial(canon: Canon) -> GameState:
-    """Состояние на момент начала сессии: turn=0, стартовая локация, флаги из канона."""
     flags = dict(canon.initial_state.get("flags", {}))
     return GameState(
         turn=0,
@@ -19,8 +20,8 @@ def project_initial(canon: Canon) -> GameState:
         game_over=False,
     )
 
+
 def apply_effect(state: GameState, effect: dict[str, Any]) -> GameState:
-    """Применяет один эффект. Не меняет turn — это делает apply_event."""
     etype = effect["type"]
 
     if etype == "move":
@@ -62,10 +63,9 @@ def apply_effect(state: GameState, effect: dict[str, Any]) -> GameState:
 
     raise ProjectionError(f"unknown effect type {etype!r}")
 
+
 def apply_event(state: GameState, event: Event) -> GameState:
-    """Применяет одно событие лога к состоянию."""
     if event.type == "presentation":
-        # Презентация — не state-changing, но должна принадлежать уже наступившему ходу.
         if event.turn > state.turn:
             raise ProjectionError(
                 f"presentation turn {event.turn} is in the future (state turn {state.turn})"
@@ -87,8 +87,8 @@ def apply_event(state: GameState, event: Event) -> GameState:
             new_state = apply_effect(new_state, effect)
     return replace(new_state, turn=event.turn)
 
+
 def project(events: list[Event], canon: Canon) -> GameState:
-    """Свёртка событий в состояние. Детерминирована: те же events+canon → то же state."""
     state = project_initial(canon)
     for event in events:
         state = apply_event(state, event)

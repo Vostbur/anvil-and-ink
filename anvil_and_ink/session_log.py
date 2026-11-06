@@ -6,6 +6,7 @@ from pathlib import Path
 from anvil_and_ink.models import Canon, Event, GameState
 from anvil_and_ink.projection import ProjectionError, project
 
+
 class SessionLog:
     """Append-only JSONL. Сейв = этот файл + канон."""
 
@@ -42,12 +43,7 @@ class SessionLog:
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(asdict(event), ensure_ascii=False) + "\n")
 
-    def append_turn(
-        self,
-        turn: int,
-        command: dict,
-        outcome: dict,
-    ) -> Event:
+    def append_turn(self, turn: int, command: dict, outcome: dict) -> Event:
         if turn != self._last_turn + 1:
             raise ValueError(f"turn {turn} != expected {self._last_turn + 1}")
         event = Event(
@@ -61,13 +57,7 @@ class SessionLog:
         self._last_turn = turn
         return event
 
-    def append_presentation(
-        self,
-        turn: int,
-        final_text: str,
-        source: str,
-        **extra,
-    ) -> Event:
+    def append_presentation(self, turn: int, final_text: str, source: str, **extra) -> Event:
         if turn != self._last_turn:
             raise ValueError(
                 f"presentation turn {turn} != current turn {self._last_turn}"
@@ -82,7 +72,7 @@ class SessionLog:
         self._append(event)
         return event
 
+
 def load_state(path: Path, canon: Canon) -> tuple[GameState, list[Event]]:
-    """Восстанавливает состояние и полный лог. Возвращает оба — narrative нужен LLM."""
     events = SessionLog(path).read_all()
     return project(events, canon), events

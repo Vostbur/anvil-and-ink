@@ -1,10 +1,9 @@
 import re
-from dataclasses import dataclass
 from types import MappingProxyType
 
 from anvil_and_ink.models import Canon, Command
 
-# ---- D-62: фиксированный набор кодов ошибок парсера ----
+# D-62: коды парсера. Не пересекаются с canon.reason_codes.
 PARSE_ERRORS = frozenset({
     "empty_input",
     "unknown_verb",
@@ -16,22 +15,20 @@ PARSE_ERRORS = frozenset({
     "missing_item",
     "missing_npc",
     "missing_target",
+    "missing_topic",
     "trailing_tokens",
 })
 
 _PUNCT_RE = re.compile(r"[^\w\s-]", re.UNICODE)
 
 _STOPWORDS = frozenset({
-    # русский
     "в", "во", "на", "с", "со", "к", "ко", "от", "ото", "из",
     "по", "и", "о", "об", "обо", "про",
-    # английский
     "the", "a", "an", "to", "on", "in", "with", "from", "about", "at",
 })
 
 
 def normalize(text: str) -> str:
-    """Приводит ввод к канонической форме: нижний регистр, ё→е, без пунктуации."""
     text = text.lower().replace("ё", "е")
     text = _PUNCT_RE.sub(" ", text)
     return " ".join(text.split())
@@ -66,19 +63,14 @@ def _similarity(a: str, b: str) -> float:
 
 
 def _threshold(a: str, b: str) -> float:
-    # короткие слова прощают одну опечатку, длинные требуют большей похожести
     return 0.6 if max(len(a), len(b)) <= 3 else 0.7
 
 
 def _match(token: str, aliases: dict[str, str]) -> tuple[str | None, float]:
-    """aliases: normalized_alias → target_id. Возвращает (best_id, score).
-
-    Точное совпадение всегда имеет приоритет. При равном fuzzy-score выбирается
-    лексикографически меньший alias — детерминизм.
-    """
     if token in aliases:
         return aliases[token], 1.0
-    best_id, best_score = None, 0.0
+    best_id: str | None = None
+    best_score = 0.0
     for alias in sorted(aliases):
         score = _similarity(token, alias)
         if score > best_score and score >= _threshold(token, alias):
@@ -88,7 +80,6 @@ def _match(token: str, aliases: dict[str, str]) -> tuple[str | None, float]:
 
 
 def _aliases(section: dict[str, dict], include_name: bool = True) -> dict[str, str]:
-    """Собирает все алиасы реестра в один словарь. Имя сущности тоже считается алиасом."""
     out: dict[str, str] = {}
     for entity_id, entity in section.items():
         if include_name and entity.get("name"):
@@ -102,16 +93,14 @@ def _verb_aliases(verbs: dict[str, dict]) -> dict[str, str]:
     out: dict[str, str] = {}
     for verb_id in sorted(verbs):
         for alias in verbs[verb_id].get("aliases", []):
-            # при коллизии оставляем лексикографически меньший verb_id (D-64)
             norm = normalize(alias)
-            out.setdefault(norm, verb_id)
+            out.setdefault(norm, verb_id)  # D-64
     return out
 
 
 def _resolve_arg(spec: str, token: str, canon: Canon) -> str | None:
     if spec == "direction":
         aliases = _aliases(canon.directions, include_name=False)
-        # направления обычно не содержат name
         for d_id, d in canon.directions.items():
             aliases[normalize(d["name"])] = d_id
         resolved, _ = _match(token, aliases)
@@ -127,16 +116,11 @@ def _resolve_arg(spec: str, token: str, canon: Canon) -> str | None:
         resolved, _ = _match(token, merged)
         return resolved
     if spec == "topic":
-        # topic — свободный текст, не разрешается в id
         return token
     return None
 
 
 def _match_verb(tokens: list[str], verbs: dict[str, dict]) -> tuple[str | None, int, float]:
-    """Ищет самый длинный префикс токенов, соответствующий глаголу.
-
-    Возвращает (verb_id, consumed_tokens, confidence).
-    """
     aliases = _verb_aliases(verbs)
     for n in range(min(3, len(tokens)), 0, -1):
         phrase = " ".join(tokens[:n])
@@ -167,7 +151,6 @@ def parse(raw: str, canon: Canon) -> Command:
     required = list(verb_def.get("args", []))
     optional = list(verb_def.get("optional_args", []))
 
-    # D-65: если последний обязательный аргумент — topic, съедаем весь остаток
     args: dict[str, str | None] = {}
     errors: list[str] = []
 
