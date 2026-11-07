@@ -68,7 +68,7 @@ Command:
 Outcome:
   result:        ok | fail
   reason_code:   string    # из reason_codes канона
-  applied:       [primitive]   # пустой при fail; непустой при ok (кроме LOOK)
+  applied:       [primitive]   # пустой при fail; непустой при ok (кроме LOOK и информационного TALK без эффектов)
   response_text: string | null  # canon response или response_on_fail, если применимо
   seed:          int | null     # зарезервировано; в MVP всегда null
 ```

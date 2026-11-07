@@ -11,8 +11,8 @@ apply_command(command: Command, projection: ProjectionLookup, canon: Canon) -> O
 ```
 
 `Outcome.applied`:
-- `[]` при `result = fail`;
-- непустой при `result = ok`, кроме LOOK (пустой).
+`[]` при `result = fail`;
+непустой при `result = ok`, кроме LOOK (пустой) и информационного TALK без эффектов (пустой, см. D-60).
 
 ## Закрытые наборы
 
@@ -172,7 +172,7 @@ apply_command(command: Command, projection: ProjectionLookup, canon: Canon) -> O
 ### Инварианты (проверяются в каждом тесте)
 - Сохранение предметов: сумма по `inventory` + `item_placement` + «произведено эффектами» = исходной.
 - Согласованность id: все `applied` ссылаются на объявленные флаги/предметы.
-- `applied=[]` при `fail`; `applied≠[]` при `ok` (кроме LOOK).
+- `applied=[]` при `fail`; `applied≠[]` при `ok` (кроме LOOK и информационного TALK без эффектов, см. D-60).
 
 ## Известные ограничения
 
