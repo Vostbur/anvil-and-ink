@@ -82,6 +82,7 @@ def build(
     recent_events: Optional[List[Event]],
     turn: int,
     config: Optional[PromptBuilderConfig] = None,
+    retry_note: Optional[str] = None,
 ) -> tuple[str, Manifest]:
     """
     Собирает промпт для LLM и манифест для валидатора.
@@ -116,6 +117,7 @@ def build(
             recent_b.text,
             this_turn_b.text,
             task_b.text,
+            retry_note,
         )
 
         if _tokens(prompt) <= config.total_budget:
@@ -384,15 +386,19 @@ def _recent_line(ev: Event, canon: Canon, names: set) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 
-def _assemble(system: str, scene: str, recent: str, this_turn: str, task: str) -> str:
+def _assemble(system, scene, recent, this_turn, task, retry_note=None):
     recent_body = recent if recent else "(нет предыдущих ходов)"
-    return (
-        "[SYSTEM]\n" + system + "\n\n"
-        "[SCENE]\n" + scene + "\n\n"
-        "[RECENT]\n" + recent_body + "\n\n"
-        "[THIS TURN]\n" + this_turn + "\n\n"
-        "[TASK]\n" + task
-    )
+    parts = [
+        "[SYSTEM]\n" + system,
+        "[SCENE]\n" + scene,
+        "[RECENT]\n" + recent_body,
+        "[THIS TURN]\n" + this_turn,
+    ]
+    # Заметка ретрая вставляется перед [TASK] (D-68).
+    if retry_note is not None:
+        parts.append(retry_note)
+    parts.append("[TASK]\n" + task)
+    return "\n\n".join(parts)
 
 
 def _filter_recent(events: List[Event]) -> List[Event]:

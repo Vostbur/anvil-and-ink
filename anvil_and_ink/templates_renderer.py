@@ -196,3 +196,48 @@ def _assemble_scene(snapshot: RenderSnapshot) -> str:
     if entities:
         return f"{description} Здесь: {', '.join(entities)}."
     return f"{description} Здесь пусто."
+
+def build_render_snapshot(command, outcome, projection, canon) -> RenderSnapshot:
+    """
+    Собирает минимальный снапшот для рендерера шаблонов.
+
+    Используется лестницей на фолбэк-путях (ступень 3/4 и UNKNOWN). См. D-67.
+    """
+
+    loc_id = projection.current_location()
+    loc = canon.locations.get(loc_id)
+
+    item_names = {iid: item.name for iid, item in canon.items.items()}
+    npc_names = {nid: npc.name for nid, npc in canon.npcs.items()}
+    use_target_names = {uid: ut.name for uid, ut in canon.use_targets.items()}
+    direction_names = {did: d.name for did, d in canon.directions.items()}
+
+    npcs_here = tuple(
+        npc_names[nid] for nid in projection.npcs_here() if nid in npc_names
+    )
+    items_here = tuple(
+        (item_names[iid], count)
+        for iid, count in projection.items_here().items()
+        if iid in item_names
+    )
+    use_targets_here = tuple(
+        use_target_names[uid]
+        for uid in projection.use_targets_here()
+        if uid in use_target_names
+    )
+
+    return RenderSnapshot(
+        item_id=command.args.get("item"),
+        npc_id=command.args.get("npc"),
+        target_id=command.args.get("target"),
+        direction_id=command.args.get("direction"),
+        topic=command.args.get("topic"),
+        item_names=item_names,
+        npc_names=npc_names,
+        use_target_names=use_target_names,
+        direction_names=direction_names,
+        location_description=loc.description if loc else "",
+        npcs_here=npcs_here,
+        items_here=items_here,
+        use_targets_here=use_targets_here,
+    )
