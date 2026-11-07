@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional
 
 from .engine import apply_command as engine_apply_command
@@ -119,6 +119,7 @@ class Session:
         # Ошибка целостности → аварийная остановка сессии (D-47).
         try:
             new_state = projection_apply(self._state, list(outcome.applied))
+            new_state = replace(new_state, turn=turn)
         except IntegrityError:
             self._aborted = True
             self._abort_reason = "integrity_error"
@@ -207,7 +208,8 @@ class Session:
         for event in turn_events:
             state = projection_apply(state, list(event.outcome.applied))
         max_turn = turn_events[-1].turn if turn_events else 0
-
+        state = replace(state, turn=max_turn)
+        
         lookup = ProjectionLookup(state, canon)
         # game_finished пересчитывается по проекции, а не берётся из лога.
         game_finished = _win_condition_met(lookup, canon)
