@@ -1,10 +1,12 @@
-"""Сквозные контракты: ARCHITECTURE.md §2."""
+"""Сквозные контракты. ARCHITECTURE.md §3. Имена полей — как в спеках."""
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 
-# ---------- Канон ----------
+# ============================================================
+# КАНОН (immutable, загружается один раз)
+# ============================================================
 
 @dataclass(frozen=True)
 class Canon:
@@ -15,135 +17,192 @@ class Canon:
     npcs: dict[str, dict[str, Any]]
     items: dict[str, dict[str, Any]]
     use_targets: dict[str, dict[str, Any]]
-    verbs: dict[str, dict[str, Any]]
+    verbs: dict[str, dict[str, Any]]                       # {GO: {aliases, args}, ...}
     directions: dict[str, dict[str, Any]]
-    reason_codes: set[str]
+    reason_codes: set[str]                                 # ok, unknown + произвольные
     win_condition: list[dict[str, Any]]
 
 
-# ---------- Шаблоны ----------
+# ============================================================
+# ШАБЛОНЫ
+# ============================================================
 
 @dataclass(frozen=True)
 class Templates:
-    canon_guarantee: set[tuple[str, str]]
+    canon_guarantee: set[tuple[str, str]]                  # {(verb, "ok"), ...}
     generic: dict[str, list[str]]
     specific: dict[str, dict[str, list[str]]]
 
 
-# ---------- Событие (журнал) ----------
+# ============================================================
+# КОМАНДА (выход парсера)
+# ============================================================
+# verb всегда есть. Если не распознан — "UNKNOWN".
+# args: id сущностей или None. resolved: для каждого аргумента — bool.
+# Например, "взять ключ" при отсутствии ключа в каноне:
+#   verb="TAKE", args={"item": None}, resolved={"item": False}
 
 @dataclass(frozen=True)
-class Event:
-    event_id: int
-    turn: int
-    ts: str
-    type: str                                     # "turn" | "presentation"
-    payload: dict[str, Any]
+class Command:
+    verb: str
+    raw: str
+    args: Mapping[str, Any] = field(default_factory=dict)
+    resolved: Mapping[str, bool] = field(default_factory=dict)
+
+    @property
+    def is_unknown(self) -> bool:
+        return self.verb == "UNKNOWN"
 
 
-# ---------- Состояние ----------
+# ============================================================
+# ПРИМИТИВЫ (applied в Outcome — это их список)
+# ============================================================
+# Канонические (могут быть в каноне, в effect'ах):
+#   set_flag(flag, value)
+#   add_to_inventory(item, count)
+#   remove_from_inventory(item, count)
+# Внутренние (только движок генерирует; в каноне не встречаются):
+#   add_to_location(loc, item, count)
+#   remove_from_location(loc, item, count)
+#   change_location(to)
+#
+# Представление: dict с "type" и полями. Immutable на уровне конвенции.
+
+Primitive = dict[str, Any]
+
+
+# ============================================================
+# OUTCOME (выход движка)
+# ============================================================
+# result: "ok" | "fail"
+# reason_code: из canon.reason_codes
+# applied: список примитивов. При fail — [].
+#   При ok — непустой, кроме LOOK (пустой).
+# response_text: canon-текст (response / response_on_fail) или None.
+# seed: null в MVP (зарезервировано для RNG).
+
+@dataclass(frozen=True)
+class Outcome:
+    result: Literal["ok", "fail"]
+    reason_code: str
+    applied: tuple[Primitive, ...] = ()
+    response_text: str | None = None
+    seed: int | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.result == "ok"
+
+
+# ============================================================
+# СОСТОЯНИЕ (проекция)
+# ============================================================
+# inventory, item_placement, stats: словари без нулевых значений.
+# npc_locations: {npc_id: loc_id}, в MVP статичен.
 
 @dataclass(frozen=True)
 class GameState:
     turn: int
     location: str
-    inventory: tuple[str, ...]                    # D-60
-    flags: Mapping[str, Any]                      # D-60: MappingProxyType
-    won: bool
-    game_over: bool
-
-    def flag(self, name: str) -> Any:
-        return self.flags.get(name)
+    inventory: Mapping[str, int]                            # {item_type_id: count}
+    stats: Mapping[str, int]                                # {hp: 10}
+    flags: Mapping[str, Any]                                # {flag_id: bool|number}
+    item_placement: Mapping[str, Mapping[str, int]]         # {loc_id: {item_type_id: count}}
+    npc_locations: Mapping[str, str]                        # {npc_id: loc_id}
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "turn": self.turn,
             "location": self.location,
-            "inventory": list(self.inventory),
+            "inventory": dict(self.inventory),
+            "stats": dict(self.stats),
             "flags": dict(self.flags),
-            "won": self.won,
-            "game_over": self.game_over,
+            "item_placement": {loc: dict(items) for loc, items in self.item_placement.items()},
+            "npc_locations": dict(self.npc_locations),
         }
 
 
-# ---------- Команда ----------
+# ============================================================
+# СОБЫТИЕ (журнал)
+# ============================================================
+# kind: "turn" | "presentation"
+# Для "turn":   payload = {raw, command, outcome}
+# Для "presentation": payload = {final_text, rung, ...}
+# Единственное, что нужно проекции — outcome.applied и turn.
 
 @dataclass(frozen=True)
-class Command:
-    raw: str
-    verb: str | None
-    args: Mapping[str, str | None]
-    parse_errors: tuple[str, ...] = ()            # D-62
-    confidence: float = 0.0
-
-    @property
-    def recognized(self) -> bool:
-        return self.verb is not None and not self.parse_errors
+class Event:
+    turn: int
+    kind: Literal["turn", "presentation"]
+    payload: dict[str, Any]
 
 
-# ---------- Результат движка ----------
-
-@dataclass(frozen=True)
-class Outcome:
-    applied: bool
-    reason_code: str
-    effects: tuple[dict[str, Any], ...] = ()
-    details: Mapping[str, Any] | None = None
-
-
-# ---------- Результат рендера ----------
-
-@dataclass(frozen=True)
-class RenderedText:
-    text: str
-    source: str                                   # "specific" | "generic"
-    template: str
-    warnings: tuple[str, ...] = ()
-
-
-# ---------- Манифест (D-75) ----------
-# Что изменилось в этом ходу. Единственный источник истины для LLM
-# о фактических изменениях состояния. LLM не должна выдумывать изменения,
-# которых нет в манифесте.
+# ============================================================
+# МАНИФЕСТ (то, что «видел» нарратор)
+# ============================================================
+# allowed_names: нормализованные имена (lowercase, ё→е)
+# allowed_numbers: содержательные числа из сцены и хода
+# mode: "look" | "describe"
+# verb, reason_code: для контекста
 
 @dataclass(frozen=True)
 class Manifest:
-    turn: int
-    verb: str | None
+    allowed_names: frozenset[str]
+    allowed_numbers: frozenset[int]
+    mode: Literal["look", "describe"]
+    verb: str
     reason_code: str
-    applied: bool
-    location_before: str
-    location_after: str
-    inventory_added: tuple[str, ...]
-    inventory_removed: tuple[str, ...]
-    # flag_id -> (old_value, new_value)
-    flags_changed: Mapping[str, tuple[Any, Any]]
-    won: bool                   # True, если победа случилась именно в этом ходу
-    game_over: bool             # True, если game_over именно в этом ходу
-    rendered_source: str        # "specific" | "generic"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "turn": self.turn,
-            "verb": self.verb,
-            "reason_code": self.reason_code,
-            "applied": self.applied,
-            "location_before": self.location_before,
-            "location_after": self.location_after,
-            "inventory_added": list(self.inventory_added),
-            "inventory_removed": list(self.inventory_removed),
-            "flags_changed": {k: list(v) for k, v in self.flags_changed.items()},
-            "won": self.won,
-            "game_over": self.game_over,
-            "rendered_source": self.rendered_source,
-        }
 
 
-# ---------- Промпт ----------
+# ============================================================
+# ПРОМПТ
+# ============================================================
 
 @dataclass(frozen=True)
 class Prompt:
-    system: str
-    user: str
+    text: str
     manifest: Manifest
-    history_turns_used: int
+
+
+# ============================================================
+# РЕЗУЛЬТАТ ХОДА (возврат session.step)
+# ============================================================
+
+@dataclass(frozen=True)
+class TurnResult:
+    text: str
+    game_finished: bool = False
+    aborted: bool = False
+    abort_reason: str | None = None
+
+
+# ============================================================
+# РЕЗУЛЬТАТ ВАЛИДАТОРА
+# ============================================================
+
+@dataclass(frozen=True)
+class ValidationReason:
+    code: Literal[
+        "empty", "too_short", "too_long",
+        "mechanics_leak", "unknown_number", "unknown_name",
+    ]
+    message: str
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    ok: bool
+    reason: ValidationReason | None = None
+
+
+# ============================================================
+# РЕЗУЛЬТАТ ЛЕСТНИЦЫ
+# ============================================================
+
+@dataclass(frozen=True)
+class LadderResult:
+    final_text: str
+    rung: int | None                                        # 1..4, null при UNKNOWN
+    skip_reason: str | None = None                          # "unknown_command" | "config_error"
+    fallback_reason: str | None = None                      # "timeout_twice" | "validation_failed_twice" | "mixed" | "build_error"
+    diagnostics: dict[str, Any] = field(default_factory=dict)
