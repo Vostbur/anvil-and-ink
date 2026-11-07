@@ -679,6 +679,6 @@ def test_at_3_use_flask_twice_second_time_unchanged(canon):
     second_outcome = apply_command(command, lookup(state, canon), canon)
 
     assert second_outcome.result == "fail"
-    assert second_outcome.reason_code == "condition_not_met"
+    assert second_outcome.reason_code == "not_in_inventory"
     assert second_outcome.applied == tuple()
-    assert snapshot(state) == before    
+    assert snapshot(state) == before

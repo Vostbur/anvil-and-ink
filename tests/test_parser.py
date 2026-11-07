@@ -58,10 +58,13 @@ def test_pa_8(canon):
 
 def test_pa_9(canon):
     cmd = parse("использовать дверь кодом", canon)
+
     assert cmd.verb == "USE"
-    # Известное ограничение: без предлога первый токен — item
-    assert cmd.args.get("item") == "exit_north_market"
-    assert cmd.args.get("target") == "item_code"
+    assert cmd.args.get("item") is None
+    assert cmd.resolved.get("item") is False
+
+    assert cmd.args.get("target") == "exit_north_market"
+    assert cmd.resolved.get("target") is True
 
 def test_pa_10(canon):
     cmd = parse("абракадабра", canon)
