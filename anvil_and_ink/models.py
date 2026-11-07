@@ -99,3 +99,51 @@ class RenderedText:
     source: str                                   # "specific" | "generic"
     template: str
     warnings: tuple[str, ...] = ()
+
+
+# ---------- Манифест (D-75) ----------
+# Что изменилось в этом ходу. Единственный источник истины для LLM
+# о фактических изменениях состояния. LLM не должна выдумывать изменения,
+# которых нет в манифесте.
+
+@dataclass(frozen=True)
+class Manifest:
+    turn: int
+    verb: str | None
+    reason_code: str
+    applied: bool
+    location_before: str
+    location_after: str
+    inventory_added: tuple[str, ...]
+    inventory_removed: tuple[str, ...]
+    # flag_id -> (old_value, new_value)
+    flags_changed: Mapping[str, tuple[Any, Any]]
+    won: bool                   # True, если победа случилась именно в этом ходу
+    game_over: bool             # True, если game_over именно в этом ходу
+    rendered_source: str        # "specific" | "generic"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "turn": self.turn,
+            "verb": self.verb,
+            "reason_code": self.reason_code,
+            "applied": self.applied,
+            "location_before": self.location_before,
+            "location_after": self.location_after,
+            "inventory_added": list(self.inventory_added),
+            "inventory_removed": list(self.inventory_removed),
+            "flags_changed": {k: list(v) for k, v in self.flags_changed.items()},
+            "won": self.won,
+            "game_over": self.game_over,
+            "rendered_source": self.rendered_source,
+        }
+
+
+# ---------- Промпт ----------
+
+@dataclass(frozen=True)
+class Prompt:
+    system: str
+    user: str
+    manifest: Manifest
+    history_turns_used: int

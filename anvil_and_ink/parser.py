@@ -98,26 +98,23 @@ def _verb_aliases(verbs: dict[str, dict]) -> dict[str, str]:
     return out
 
 
-def _resolve_arg(spec: str, token: str, canon: Canon) -> str | None:
+def _resolve_arg(spec: str, token: str, canon: Canon) -> tuple[str | None, float]:
+    """D-80: возвращает (id, score) — score входит в общий confidence."""
     if spec == "direction":
         aliases = _aliases(canon.directions, include_name=False)
         for d_id, d in canon.directions.items():
             aliases[normalize(d["name"])] = d_id
-        resolved, _ = _match(token, aliases)
-        return resolved
+        return _match(token, aliases)
     if spec == "item":
-        resolved, _ = _match(token, _aliases(canon.items))
-        return resolved
+        return _match(token, _aliases(canon.items))
     if spec == "npc":
-        resolved, _ = _match(token, _aliases(canon.npcs))
-        return resolved
+        return _match(token, _aliases(canon.npcs))
     if spec == "target":
         merged = {**_aliases(canon.use_targets), **_aliases(canon.npcs)}
-        resolved, _ = _match(token, merged)
-        return resolved
+        return _match(token, merged)
     if spec == "topic":
-        return token
-    return None
+        return token, 1.0    # topic — свободный текст, всегда "успех"
+    return None, 0.0
 
 
 def _match_verb(tokens: list[str], verbs: dict[str, dict]) -> tuple[str | None, int, float]:
@@ -157,11 +154,13 @@ def parse(raw: str, canon: Canon) -> Command:
     tail_is_topic = bool(required and required[-1] == "topic")
     positional = required[:-1] if tail_is_topic else required
 
+    # Обязательные — всегда в args (None, если пропущен)
     for i, spec in enumerate(positional):
         if i < len(remaining):
             token = remaining[i]
-            resolved = _resolve_arg(spec, token, canon)
+            resolved, score = _resolve_arg(spec, token, canon)
             args[spec] = resolved
+            confidence = min(confidence, score)
             if resolved is None:
                 errors.append(f"unknown_{spec}")
         else:
@@ -177,15 +176,15 @@ def parse(raw: str, canon: Canon) -> Command:
             errors.append("missing_topic")
         leftover = []
 
+    # D-79: optional args попадают в args ТОЛЬКО если указаны
     for spec in optional:
         if leftover:
             token = leftover.pop(0)
-            resolved = _resolve_arg(spec, token, canon)
+            resolved, score = _resolve_arg(spec, token, canon)
             args[spec] = resolved
+            confidence = min(confidence, score)
             if resolved is None:
                 errors.append(f"unknown_{spec}")
-        else:
-            args.setdefault(spec, None)
 
     if leftover:
         errors.append("trailing_tokens")

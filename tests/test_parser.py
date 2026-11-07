@@ -72,7 +72,9 @@ def test_P5_levenshtein_basic():
 
 def test_P6_similarity_bounds():
     assert _similarity("north", "north") == 1.0
-    assert 0.0 <= _similarity("north", "south") < 0.5
+    # "north" vs "south" — 2 правки из 5 → 0.6 (проверка ошибки: было "< 0.5")
+    assert 0.0 <= _similarity("north", "south") < 0.7
+    assert _similarity("north", "zzzzz") < 0.3
 
 # ---------- Базовые команды ----------
 

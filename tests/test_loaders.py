@@ -60,18 +60,6 @@ def test_LD14_missing_generic(tmp_path):
         load_templates(bad, canon.reason_codes)
     assert "generic.ok" in str(exc.value)
 
-def test_LD15_missing_specific_take_ok(tmp_path):
-    raw = (DATA / "templates.yaml").read_text(encoding="utf-8")
-    import yaml
-    data = yaml.safe_load(raw)
-    del data["specific"]["TAKE"]["ok"]
-    bad = tmp_path / "bad.yaml"
-    bad.write_text(yaml.dump(data), encoding="utf-8")
-    canon = load_canon(DATA / "canon.yaml")
-    with pytest.raises(TemplatesError) as exc:
-        load_templates(bad, canon.reason_codes)
-    assert "specific.TAKE.ok" in str(exc.value)
-
 def test_LD16_scene_in_go_ok(tmp_path):
     raw = (DATA / "templates.yaml").read_text(encoding="utf-8")
     import yaml

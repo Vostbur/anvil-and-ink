@@ -16,7 +16,10 @@ class CanonError(Exception):
         super().__init__("\n".join(errors))
 
 
+# D-81: id локаций/NPC/предметов/направлений/целей — lowercase snake_case;
+# id глаголов — UPPERCASE (LOOK, GO, TAKE…), как в canon.yaml.
 ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+VERB_ID_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
 def _err(errors: list[str], path: str, msg: str) -> None:
@@ -52,14 +55,15 @@ def load_canon(path: str | Path) -> Canon:
             raw[sec] = [] if sec != "initial_state" else {}
 
     # ---------- Фаза 2. Реестры ----------
-    def index_list(section: str, key: str = "id") -> dict[str, dict]:
+    def index_list(section: str, key: str = "id",
+                   id_re: re.Pattern = ID_RE) -> dict[str, dict]:
         index: dict[str, dict] = {}
         for i, item in enumerate(raw[section]):
             if not isinstance(item, dict) or key not in item:
                 _err(errors, f"{section}[{i}]", f"missing {key}")
                 continue
             item_id = item[key]
-            if not isinstance(item_id, str) or not ID_RE.fullmatch(item_id):
+            if not isinstance(item_id, str) or not id_re.fullmatch(item_id):
                 _err(errors, f"{section}[{i}].{key}", f"invalid id {item_id!r}")
                 continue
             if item_id in index:
@@ -73,7 +77,7 @@ def load_canon(path: str | Path) -> Canon:
     items = index_list("items")
     use_targets = index_list("use_targets")
     directions = index_list("directions")
-    verbs = index_list("verbs")
+    verbs = index_list("verbs", id_re=VERB_ID_RE)       # D-81
 
     flags: dict[str, dict] = {}
     for f_id, f_def in raw["flags"].items():
@@ -96,7 +100,8 @@ def load_canon(path: str | Path) -> Canon:
         reason_codes.add(rc)
     missing_engine = _ENGINE_CODES - reason_codes
     if missing_engine:
-        _err(errors, "reason_codes", f"missing codes required by engine: {sorted(missing_engine)}")
+        _err(errors, "reason_codes",
+             f"missing codes required by engine: {sorted(missing_engine)}")
 
     # ---------- Фаза 3. Валидация реестров ----------
     init_flags = raw["initial_state"].get("flags", {})
@@ -142,7 +147,8 @@ def load_canon(path: str | Path) -> Canon:
             if exit_.get("to") not in location_ids:
                 _err(errors, f"{path}.to", f"unknown location {exit_.get('to')!r}")
             if exit_.get("direction") not in direction_ids:
-                _err(errors, f"{path}.direction", f"unknown direction {exit_.get('direction')!r}")
+                _err(errors, f"{path}.direction",
+                     f"unknown direction {exit_.get('direction')!r}")
         for i, ent in enumerate(loc.get("entities", [])):
             if ent not in item_type_ids and ent not in npc_ids:
                 _err(errors, f"locations[{loc_id}].entities[{i}]",
@@ -267,17 +273,20 @@ def load_canon(path: str | Path) -> Canon:
             if eff.get("type") == "set_flag" and eff.get("value") is True:
                 set_true_flags.add(eff["flag"])
 
+    # D-78: отсутствие "equals" означает "equals: true"
     for loc_id, loc in locations.items():
         for i, exit_ in enumerate(loc.get("exits", [])):
             for j, cond in enumerate(exit_.get("condition", [])):
-                if cond.get("type") == "flag" and cond.get("equals") is True:
-                    if cond["flag"] not in set_true_flags:
-                        _err(errors,
-                             f"locations[{loc_id}].exits[{i}].condition[{j}]",
-                             f"flag {cond['flag']!r} is never set to true")
+                if cond.get("type") == "flag" \
+                        and cond.get("equals", True) is True \
+                        and cond["flag"] not in set_true_flags:
+                    _err(errors,
+                         f"locations[{loc_id}].exits[{i}].condition[{j}]",
+                         f"flag {cond['flag']!r} is never set to true")
 
     for i, cond in enumerate(raw["win_condition"]):
-        if cond.get("type") == "flag" and cond.get("equals") is True \
+        if cond.get("type") == "flag" \
+                and cond.get("equals", True) is True \
                 and cond["flag"] not in set_true_flags:
             _err(errors, f"win_condition[{i}]",
                  f"win condition flag {cond['flag']!r} is never set to true")
@@ -315,14 +324,15 @@ def load_canon(path: str | Path) -> Canon:
             continue
         cond_flags: set[str] = set()
         for cond in exit_obj.get("condition", []):
-            if cond.get("type") == "flag" and cond.get("equals") is True:
+            if cond.get("type") == "flag" and cond.get("equals", True) is True:
                 cond_flags.add(cond["flag"])
         if not cond_flags:
             continue
         found = False
         for rule in ut.get("use", []):
             for eff in rule.get("effects", []):
-                if eff.get("type") == "set_flag" and eff.get("value") is True \
+                if eff.get("type") == "set_flag" \
+                        and eff.get("value") is True \
                         and eff["flag"] in cond_flags:
                     found = True
                     break
@@ -332,7 +342,6 @@ def load_canon(path: str | Path) -> Canon:
             _err(errors, f"use_targets.{ut_id}",
                  "exit requires flag(s) that no USE rule sets")
 
-    # Предупреждения, не ошибки
     all_names: list[str] = []
     for registry in (locations, npcs, items, use_targets):
         for entity in registry.values():

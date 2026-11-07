@@ -9,7 +9,8 @@ ENGINE_REASON_CODES = frozenset({"ok", "unknown", "denied", "not_applicable"})
 def _check_condition(state: GameState, cond: dict[str, Any]) -> bool:
     t = cond.get("type")
     if t == "flag":
-        return state.flags.get(cond["flag"]) == cond["equals"]
+        expected = cond.get("equals", True)
+        return state.flags.get(cond["flag"]) == expected
     if t == "inventory_count":
         count = sum(1 for x in state.inventory if x == cond["item"])
         op = cond.get("op", ">=")

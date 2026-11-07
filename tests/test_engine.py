@@ -54,6 +54,7 @@ verbs:
   - {id: GO,   aliases: [go, идти], args: [direction]}
   - {id: TAKE, aliases: [take, взять], args: [item]}
   - {id: USE,  aliases: [use, использовать], args: [item, target]}
+  - {id: SAY,  aliases: [say, сказать], args: [topic]}
 directions:
   - {id: north, name: Север, aliases: [north, север]}
   - {id: south, name: Юг, aliases: [south, юг]}
@@ -257,6 +258,7 @@ def test_engine_requires_reason_codes(tmp_path):
         load_canon(p)
     assert "denied" in str(exc.value)
 
+
 def test_engine_does_not_mutate_state(golden_canon, engine):
     state = project_initial(golden_canon)
     snapshot = (state.turn, state.location, state.inventory, dict(state.flags))
@@ -264,16 +266,19 @@ def test_engine_does_not_mutate_state(golden_canon, engine):
     engine.answer(state, parse("go north", golden_canon))
     assert (state.turn, state.location, state.inventory, dict(state.flags)) == snapshot
 
+
 def test_engine_determinism(golden_canon, engine):
     state = project_initial(golden_canon)
     cmd = parse("go north", golden_canon)
     assert engine.answer(state, cmd) == engine.answer(state, cmd)
+
 
 def test_game_over_blocks_commands(golden_canon, engine):
     state = project_initial(golden_canon)
     state = replace(state, game_over=True)
     out = engine.answer(state, parse("look", golden_canon))
     assert out.applied is False and out.reason_code == "denied"
+
 
 def test_win_condition_empty_never_wins(golden_canon):
     # Пустой win_condition = никогда не выигрываем
