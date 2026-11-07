@@ -57,6 +57,11 @@ def run(
             rung = 4
         return _result(text, rung, "unknown_command", None, calls)
 
+    # Режим no-llm: клиент null → сразу ступень 3 (шаблон). См. D-69.
+    if client is None:
+        text, rung = _fallback(command, outcome, projection, canon, turn, renderer, templates)
+        return _result(text, rung, None, None, calls)
+    
     # --- Ступень 1: основной вызов ---
     try:
         prompt, manifest = builder(
