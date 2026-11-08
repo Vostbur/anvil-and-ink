@@ -258,9 +258,15 @@ def _win_condition_met(lookup: ProjectionLookup, canon) -> bool:
 
 
 def _build_dependencies(config, canon, templates):
-    # Режим определяет клиента. В MVP реальный LLM-клиент подключается извне;
-    # для no-llm клиент = None (лестница сразу ступень 3, см. D-69).
-    client = None
+    # Режим определяет клиента (D-69).
+    # no-llm: клиент = None → лестница сразу ступень 3.
+    # broken-llm: клиент = None, инжектируется извне тестом.
+    # llm: реальный Ollama-клиент (ленивая инициализация, см. llm_client.py).
+    if config.mode == "llm":
+        from .llm_client import OllamaClient
+        client = OllamaClient()
+    else:
+        client = None
     return dict(
         parse=parse_command,
         apply_command=engine_apply_command,

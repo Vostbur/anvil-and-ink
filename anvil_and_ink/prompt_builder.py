@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -52,6 +54,11 @@ _VERB_LABELS = {
     "DROP": "бросить",
     "TALK": "поговорить",
     "USE": "использовать",
+}
+
+_NUMERAL_WORDS = {
+    "один": 1, "два": 2, "три": 3, "четыре": 4, "пять": 5,
+    "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10,
 }
 
 _SYSTEM_TEMPLATE = """Ты — рассказчик текстовой приключенческой игры.
@@ -187,6 +194,7 @@ def _build_scene(
         lines.append(f"Локация: {loc_name}")
     if description:
         lines.append(description)
+        _add_text_words(names, description)
 
     relevant_ids = None
     if level >= 2 and command.verb != "LOOK":
@@ -252,7 +260,9 @@ def _build_scene(
     if extension:
         lines.append(extension)
 
-    return _Block("\n".join(lines), names, numbers)
+    text = "\n".join(lines)
+    numbers |= _extract_numbers(text)
+    return _Block(text, names, numbers)
 
 
 def _scene_verb_extension(
@@ -287,9 +297,12 @@ def _scene_verb_extension(
             item = canon.items[item_id]
             _add_name(names, item.name)
             inv_count = projection.inventory().get(item_id, 0)
-            parts.append(f"Предмет: {item.name} (в инвентаре: {inv_count})")
+
             if inv_count > 1:
+                parts.append(f"Предмет: {item.name} (в инвентаре: {inv_count})")
                 numbers.add(inv_count)
+            else:
+                parts.append(f"Предмет: {item.name}")
 
     elif verb == "TALK":
         npc_id = command.args.get("npc")
@@ -299,6 +312,7 @@ def _scene_verb_extension(
             parts.append(f"Собеседник: {npc.name}")
         topic = command.args.get("topic")
         if topic:
+            _add_name(names, topic)
             parts.append(f"Тема: {topic}")
 
     elif verb == "USE":
@@ -346,7 +360,16 @@ def _build_this_turn(
     if outcome.response_text:
         lines.append(f"Текст из мира: \"{outcome.response_text}\"")
 
-    return _Block("\n".join(lines), names, numbers)
+    text = "\n".join(lines)
+
+    _add_text_words(names, command.raw)
+
+    if outcome.response_text:
+        _add_text_words(names, outcome.response_text)
+
+    numbers |= _extract_numbers(text)
+
+    return _Block(text, names, numbers)
 
 
 def _build_recent(events: List[Event], canon: Canon, count: int) -> _Block:
@@ -360,6 +383,9 @@ def _build_recent(events: List[Event], canon: Canon, count: int) -> _Block:
         line = _recent_line(ev, canon, names)
         if line:
             lines.append(line)
+
+    # Номера ходов в RECENT — служебные метаданные, а не наблюдаемые числа мира.
+    # Их нельзя добавлять в allowed_numbers (см. test_pb_6).
     return _Block("\n".join(lines), names, set())
 
 
@@ -553,8 +579,15 @@ def _first_sentence(text: str) -> str:
 
 
 def _add_name(names: set, name: Optional[str]) -> None:
-    if name:
-        names.add(_normalize_name(name))
+    if not name:
+        return
+
+    norm = _normalize_name(name)
+    names.add(norm)
+
+    for word in re.findall(r"\w+", norm):
+        if len(word) > 2:
+            names.add(word)
 
 
 def _normalize_name(name: str) -> str:
@@ -563,3 +596,30 @@ def _normalize_name(name: str) -> str:
 
 def _tokens(text: str) -> float:
     return len(text) / 3
+
+def _extract_numbers(text: str) -> set[int]:
+    if not text:
+        return set()
+
+    numbers: set[int] = set()
+
+    for match in re.finditer(r"\d+", text):
+        numbers.add(int(match.group()))
+
+    lowered = text.lower().replace("ё", "е")
+    for word in re.findall(r"\w+", lowered):
+        value = _NUMERAL_WORDS.get(word)
+        if value is not None:
+            numbers.add(value)
+
+    return numbers
+
+
+def _add_text_words(names: set, text: Optional[str]) -> None:
+    if not text:
+        return
+
+    lowered = text.lower().replace("ё", "е")
+    for word in re.findall(r"\w+", lowered):
+        if len(word) > 2:
+            names.add(word)

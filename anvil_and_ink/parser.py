@@ -212,7 +212,7 @@ def resolve_phrase(
         return best_match
 
     # 4. Фраза цели: longest substring match со стеммингом и порогом 75 (D-76).
-    if arg_type in {"item", "npc", "target"}:
+    if arg_type in {"item", "npc", "target", "topic"}:
         phrase_tokens = phrase_norm.split()
 
         for length in range(len(phrase_tokens), 0, -1):

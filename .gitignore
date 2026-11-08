@@ -12,3 +12,6 @@ diagnostic.jsonl
 dist/
 build/
 .DS_Store
+diagnostic*.jsonl
+save*.jsonl
+transcript*.txt
